@@ -11,16 +11,20 @@ describe OroGen.qt_base.Task do
         )
         log_file_path = compute_log_file_path(task)
 
+        # We have a race between the start and the stop ... it may never call update
+        #
+        # Try for 2s and then go through the "normal" test path to see what's missing
+        20.times do
+            lines = read_log_file(log_file_path)
+            break if lines.map(&:first).include?("updateHook")
+
+            sleep 0.1
+        end
+
         agent = task.execution_agent
         plan.make_useless([agent, task])
         expect_execution.garbage_collect(true).to { emit agent.stop_event }
-
-        lines =
-            File
-            .readlines(log_file_path)
-            .find_all { |line| /^\w+: 0x/.match?(line) }
-            .map { |line| line.chomp.split(': ') }
-            .compact
+        lines = read_log_file(log_file_path)
 
         qt_app = lines.shift[1]
         expected_order = %w[configure start update stop cleanup]
@@ -48,7 +52,15 @@ describe OroGen.qt_base.Task do
 
     def compute_log_file_path(task)
         pid = task.execution_agent.pid
-        log_dir = task.execution_agent.log_dir
+        log_dir = task.execution_agent.log_dir || Roby.app.log_dir
         File.join(log_dir, "test_task-#{pid}.txt")
+    end
+
+    def read_log_file(log_file_path)
+        File
+            .readlines(log_file_path)
+            .find_all { |line| /^\w+: 0x/.match?(line) }
+            .map { |line| line.chomp.split(': ') }
+            .compact
     end
 end
